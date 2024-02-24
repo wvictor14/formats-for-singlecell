@@ -6,16 +6,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-Single cell RNAseq data (scRNAseq) is substantially more complex than the previous era of bulk gene expression analysis, and part of that complexity is managing high memory operations on large data structures: 1 million observations (e.g. cells) x thousands (genes) or millions (CpGs) of observations. 
-
-What tools exist for dealing with this high dimensional type of data? In R, there are data structures, and tools for reading/writing, computing, and visualizing scRNAseq data. Today, I focus on the case where the data is too large or cumbersome to hold in memory (>1Gb - > 50 Gb), which is becoming increasingly common as scRNAseq datasets become more numerous and larger in size.
-
-But considerations for memory when working with such large data must also include the specific tasks a user wants to perform. For example, computing matrix operations, like transpose, arithmetic, etc, are going to be very different than discussions on dataset integration, cell type annotation, and clustering. 
-
-Today, I focus on the common task of analyzing 1 gene in R at a time, without needing to load the entire scRNAseq gene expression matrix into memory. 
-
-I choose this as my focus, because I think this is a common connection point  from the very specific single cell universe of data structures and tools, to more general purpose data science toolkit e.g. tidyverse, data.table. I believe this is a very useful task, that is not well explored in the scRNAseq R data science world. This enables for example, very lightweight shiny-based web apps, that won't error out from memory limits. 
-
 # start point
 
 The starting point for this task is that we have a sparse count matrix, maybe a `Seurat` or `SingleCellExperiment` object that I want to make accessible via a shiny app to stakeholders. I can write an app that just simply works with these objects directly, but that would involve loading the several gigabytes of data into memory.
@@ -26,36 +16,13 @@ The outline for this post is that: there are some great "on-disk" streaming opti
 
 # the plan
 
-Actually, there is already a great memory-efficient solution out there called ShinyCell, which utilizes the HDF5 format. This doesn't work perfectly for me though, because I have my own app functions and framework that I want to apply. I am just interested in the memory-efficient data read functionality.
+Actually, there is already a great memory-efficient solution out there called [ShinyCell](https://github.com/SGDDNB/ShinyCell], which utilizes the HDF5 format. This doesn't work perfectly for me though, because I have my own app functions and framework that I want to apply. I am just interested in the memory-efficient data read functionality.
 
-So I will compare shinycell's rather manual h5 strategy to some other options. The other option included here is `HDF5Array` + `delayedArray`, which are some Bioconductor options specifically for Bioconductor-specific data structures, like scRNAseq.
-
-# data formats for single cell
-
-Some common formats for single cell, with drawbacks / considerations described:
-
-`.rds` - smaller on-disk footprint, quicker load, but specific to R, cannot read subsets of data; must read entire data into memory
-
-`csv` - a universal format, can speed up with `vroom`, one challenge is to write a sparse count matrix to dense representation as csv 
-
-one option I have not explored is using csvs could be to write sparse matrix to disk; then, after reading can coerce to dense. Coercion will add some overhead.
-
-`.h5ad` large on-disk footprint but allows reading subsets of data into memory. The major drawback is that it is specific to python. Although there are tools to convert into R workflows, like `basilisk` and `zellkonverter`. But these don't take advantage of the hdf5 on-disk memory savings.
-
-
-
-
-
-How easy is it to use hdf5 backed single cell gene expression matrices? How much will HDF5 improve memory / speed in common single cell queries? I hope to explore these questions in this post, by using an example use case of simply reading 1 gene from a file.
-
-I chose this as "reading 1 gene" is a common task in my analysis, pipelines, and in web apps. Most solutions for memory-optimized single cell analysis is also optimized for working with the entire 22,000 genes x 1 million cells data matrices. 
+So I will compare ShinyCell's rather manual h5 strategy to some other options. The other option included here is `HDF5Array` + `delayedArray`, which are some Bioconductor options specifically for Bioconductor-specific data structures, like scRNAseq.
 
 # key packages for this post
 
 For HDF5, there are a couple of general purpose options in R: [hdf5r](https://cran.r-project.org/web/packages/hdf5r/index.html), [rhdf5](https://bioconductor.org/packages/release/bioc/html/rhdf5.html). Then there is the bioconductor package [HDF5Array](https://bioconductor.org/packages/release/bioc/html/HDF5Array.html) which uses `hdf5r` in backend to work with bioconductor data structures specifically.
-
-I also recently came across [shinycell](https://github.com/SGDDNB/ShinyCell), a recently released R package that has a manual implementation of HDF5 to create a low memory shiny app for single cell data. I adapt shinycell's code for my manual approach.
-
 
 # other packages
 
@@ -82,29 +49,13 @@ sce <- ZilionisLungData()
 counts <- sce@assays@data$counts[,]
 ```
 
-# manual hdf5
-
-There are couple of R implementations of hdf5 for single cell gene expression data:
-
-But these are structured for single cell experiment / seurat / anndata objects,
-which at minimum contain counts matrix, but can also include multiple assays,
-cell metadata, projections, and other information.
-
-Here I make an attempt to create my own hdf5 structure for taking a dgc matrix
-as input. 
-
 # saving dgc matrix manually with hdf5r
 
-Here I litter the function with tictoc::tic and tictoc::toc to understand how
-long overall and each step takes.
+This is shinycell's approach, which is to write the sparse count matrix of a seurat / singlecellexperiment object to a dense representation on disk. Because converting the sparse matrix to dense would implode most computers, shinycell's approach is to do this in chunks / loops. 
 
-The strategy here is to write actually a dense representation of the sparase 
-matrix.
+I modify the code to make it easier to follow, and I litter the function with `tictoc::tic` and `toc` to monitor the overall and each step takes.
 
-The alternative would be to write a sparse representation which would be faster
-to write (less data), and then convert to dense on the read in endpoints. But 
-here the goal is to be able to read fast - the writing can be slow, so we but
-the processing (sparse -> dense) on the write end.
+Alternatively, we could write sparse representation to disk, which would be faster to write (less data), but then we would need to convert to dense on the read-in endpoints. I don't do that here, because the goal is to speed up read-in, not write-out. Though it may be trivially fast to coerce a 1 x 1million vector? Am not sure.
 
 
 ```{r}
