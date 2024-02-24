@@ -1,0 +1,4 @@
+*.Rproj*
+data*
+parquet.Rmd
+.Rhistory
