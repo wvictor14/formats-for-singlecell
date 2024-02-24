@@ -6,36 +6,58 @@ editor_options:
   chunk_output_type: console
 ---
 
-Single cell RNAseq data (scRNAseq) is substantially more complex than the previous era of bulk gene expression analysis. Though, an incredible amount of development in the bioinformatic scRNAseq toolset has made analysis of scRNAseq accessible to even those  without even needing access to large computational resources. 
+Single cell RNAseq data (scRNAseq) is substantially more complex than the previous era of bulk gene expression analysis, and part of that complexity is managing high memory operations on large data structures: 1 million observations (e.g. cells) x thousands (genes) or millions (CpGs) of observations. 
 
-I am lucky that in my experiences that I have always had access to cloud infrastructure (aws ec2, onsite clusters / servers) to fulfill the memory-intensive requirements of my various single cell expression and other omic analyses. But recently I have begun to encounter performance bottlenecks on user-facing apps, and the occasional >1million cell analysis. As more and more data is being generated out there, I predict that creative performance -optimized tools will become necessary to adopt into my workflows. Hence, I've decided to spend some time exploring the memory optimized solutions that exist in R for scRNAseq analysis.
+What tools exist for dealing with this high dimensional type of data? In R, there are data structures, and tools for reading/writing, computing, and visualizing scRNAseq data. Today, I focus on the case where the data is too large or cumbersome to hold in memory (>1Gb - > 50 Gb), which is becoming increasingly common as scRNAseq datasets become more numerous and larger in size.
 
-In this post, I explore using the HDF5 file format for streaming scRNAseq gene expression matrices. I use a dataset of 174000 cells. In my research I determined that HDF5 is likely most appropriate for the format of gene expression matrix (thousands of rows, ~million columns, gene x obs), rather than other sql / db alternatives like duckdb, sql etc (though I am not well versed in these), which would require significant resources to transform into required formats. Anyways, single cell data mostly travels around in flat files rather than in databases.
+But considerations for memory when working with such large data must also include the specific tasks a user wants to perform. For example, computing matrix operations, like transpose, arithmetic, etc, are going to be very different than discussions on dataset integration, cell type annotation, and clustering. 
+
+Today, I focus on the common task of analyzing 1 gene in R at a time, without needing to load the entire scRNAseq gene expression matrix into memory. 
+
+I choose this as my focus, because I think this is a common connection point  from the very specific single cell universe of data structures and tools, to more general purpose data science toolkit e.g. tidyverse, data.table. I believe this is a very useful task, that is not well explored in the scRNAseq R data science world. This enables for example, very lightweight shiny-based web apps, that won't error out from memory limits. 
+
+# start point
+
+The starting point for this task is that we have a sparse count matrix, maybe a `Seurat` or `SingleCellExperiment` object that I want to make accessible via a shiny app to stakeholders. I can write an app that just simply works with these objects directly, but that would involve loading the several gigabytes of data into memory.
+
+I was looking for ways to circumvent loading entire count matrices (the main memory-hungry culprit) into R, and this post is about that exploration.
+
+The outline for this post is that: there are some great "on-disk" streaming options, where essentially you open a *connection* to a file, then only subsets of the data file that you request are actually read into memory. 
+
+# the plan
+
+Actually, there is already a great memory-efficient solution out there called ShinyCell, which utilizes the HDF5 format. This doesn't work perfectly for me though, because I have my own app functions and framework that I want to apply. I am just interested in the memory-efficient data read functionality.
+
+So I will compare shinycell's rather manual h5 strategy to some other options. The other option included here is `HDF5Array` + `delayedArray`, which are some Bioconductor options specifically for Bioconductor-specific data structures, like scRNAseq.
 
 # data formats for single cell
 
 Some common formats for single cell, with drawbacks / considerations described:
 
-`csv` - pretty universal, can speed up with `vroom`
-`.rds` - smaller on-disk footprint, quicker load, but specific to R
-`.h5ad` - bigger on-disk,
+`.rds` - smaller on-disk footprint, quicker load, but specific to R, cannot read subsets of data; must read entire data into memory
+
+`csv` - a universal format, can speed up with `vroom`, one challenge is to write a sparse count matrix to dense representation as csv 
+
+one option I have not explored is using csvs could be to write sparse matrix to disk; then, after reading can coerce to dense. Coercion will add some overhead.
+
+`.h5ad` large on-disk footprint but allows reading subsets of data into memory. The major drawback is that it is specific to python. Although there are tools to convert into R workflows, like `basilisk` and `zellkonverter`. But these don't take advantage of the hdf5 on-disk memory savings.
 
 
-`.h5ad` has benefit of being on-disk, so the data doesn't need to be loaded into
-memory. The major drawback is that it is specific to python. Although there are tools to convert into R workflows, like `basilisk` and `zellkonverter`. But these don't take advantage of the hdf5 on-disk memory savings.
 
 
 
+How easy is it to use hdf5 backed single cell gene expression matrices? How much will HDF5 improve memory / speed in common single cell queries? I hope to explore these questions in this post, by using an example use case of simply reading 1 gene from a file.
 
+I chose this as "reading 1 gene" is a common task in my analysis, pipelines, and in web apps. Most solutions for memory-optimized single cell analysis is also optimized for working with the entire 22,000 genes x 1 million cells data matrices. 
 
-How easy is it to use hdf5 backed single cell gene expression matrices? How much will HDF5 improve memory / speed in common single cell queries? I hope to explore these questions in this post, by using an example use case
+# key packages for this post
 
-For HDF5, there are a couple of general purpose options in R: hdf5r, rhdf5. Then there is the bioconductor package HDF5Array which uses hdf5r in backend to work with bioconductor data structures specifically.
+For HDF5, there are a couple of general purpose options in R: [hdf5r](https://cran.r-project.org/web/packages/hdf5r/index.html), [rhdf5](https://bioconductor.org/packages/release/bioc/html/rhdf5.html). Then there is the bioconductor package [HDF5Array](https://bioconductor.org/packages/release/bioc/html/HDF5Array.html) which uses `hdf5r` in backend to work with bioconductor data structures specifically.
 
 I also recently came across [shinycell](https://github.com/SGDDNB/ShinyCell), a recently released R package that has a manual implementation of HDF5 to create a low memory shiny app for single cell data. I adapt shinycell's code for my manual approach.
 
 
-# key packages
+# other packages
 
 `HDF5Array` hdf5 read write dense/sparse matrices
 `hdf5r` hdf5 r implementation
