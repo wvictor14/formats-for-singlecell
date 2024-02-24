@@ -1,6 +1,52 @@
-hdf5
+Not enough memory? HDF5, a data format for single cell RNAseq data
 ================
 2024-02-23
+
+# start point
+
+The starting point for this task is that we have a sparse count matrix,
+maybe a `Seurat` or `SingleCellExperiment` object that I want to make
+accessible via a shiny app to stakeholders. I can write an app that just
+simply works with these objects directly, but that would involve loading
+the several gigabytes of data into memory.
+
+I was looking for ways to circumvent loading entire count matrices (the
+main memory-hungry culprit) into R, and this post is about that
+exploration.
+
+The outline for this post is that: there are some great “on-disk”
+streaming options, where essentially you open a *connection* to a file,
+then only subsets of the data file that you request are actually read
+into memory.
+
+# the plan
+
+Actually, there is already a great memory-efficient solution out there
+called \[ShinyCell\](<https://github.com/SGDDNB/ShinyCell>\], which
+utilizes the HDF5 format. This doesn’t work perfectly for me though,
+because I have my own app functions and framework that I want to apply.
+I am just interested in the memory-efficient data read functionality.
+
+So I will compare ShinyCell’s rather manual h5 strategy to some other
+options. The other option included here is `HDF5Array` + `delayedArray`,
+which are some Bioconductor options specifically for
+Bioconductor-specific data structures, like scRNAseq.
+
+# key packages for this post
+
+For HDF5, there are a couple of general purpose options in R:
+[hdf5r](https://cran.r-project.org/web/packages/hdf5r/index.html),
+[rhdf5](https://bioconductor.org/packages/release/bioc/html/rhdf5.html).
+Then there is the bioconductor package
+[HDF5Array](https://bioconductor.org/packages/release/bioc/html/HDF5Array.html)
+which uses `hdf5r` in backend to work with bioconductor data structures
+specifically.
+
+# other packages
+
+`HDF5Array` hdf5 read write dense/sparse matrices `hdf5r` hdf5 r
+implementation `scRNAseq` to access example scRNAseq dataset `tidyverse`
+`glue` `gt` general purpose data wrangling `tictoc` `bench` timing
 
 ``` r
 library(HDF5Array)
@@ -27,34 +73,24 @@ sce <- ZilionisLungData()
     ## loading from cache
 
 ``` r
-counts <- sce@assays@data$counts[,]
+counts <- sce@assays@data$counts[1:2000,]
 ```
-
-# manual hdf5
-
-There are couple of R implementations of hdf5 for single cell gene
-expression data:
-
-But these are structured for single cell experiment / seurat / anndata
-objects, which at minimum contain counts matrix, but can also include
-multiple assays, cell metadata, projections, and other information.
-
-Here I make an attempt to create my own hdf5 structure for taking a dgc
-matrix as input.
 
 # saving dgc matrix manually with hdf5r
 
-Here I litter the function with tictoc::tic and tictoc::toc to
-understand how long overall and each step takes.
+This is shinycell’s approach, which is to write the sparse count matrix
+of a seurat / singlecellexperiment object to a dense representation on
+disk. Because converting the sparse matrix to dense would implode most
+computers, shinycell’s approach is to do this in chunks / loops.
 
-The strategy here is to write actually a dense representation of the
-sparase matrix.
+I modify the code to make it easier to follow, and I litter the function
+with `tictoc::tic` and `toc` to monitor the overall and each step takes.
 
-The alternative would be to write a sparse representation which would be
-faster to write (less data), and then convert to dense on the read in
-endpoints. But here the goal is to be able to read fast - the writing
-can be slow, so we but the processing (sparse -\> dense) on the write
-end.
+Alternatively, we could write sparse representation to disk, which would
+be faster to write (less data), but then we would need to convert to
+dense on the read-in endpoints. I don’t do that here, because the goal
+is to speed up read-in, not write-out. Though it may be trivially fast
+to coerce a 1 x 1million vector? Am not sure.
 
 ``` r
 file_h5 <- here::here('data','counts.h5')
@@ -108,213 +144,13 @@ write_dgc_to_h5(counts, file_h5, chunk_size = 1000)
     ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
     ## 1.3 GiB
 
-    ## loop 1, rows 1:1000: 7.5 sec elapsed
+    ## loop 1, rows 1:1000: 8.48 sec elapsed
 
     ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
     ## 1.3 GiB
 
-    ## loop 2, rows 1001:2000: 7.06 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 3, rows 2001:3000: 7.08 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 4, rows 3001:4000: 7.14 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 5, rows 4001:5000: 7 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 6, rows 5001:6000: 6.36 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 7, rows 6001:7000: 7 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 8, rows 7001:8000: 6.61 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 9, rows 8001:9000: 6.62 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 10, rows 9001:10000: 6.33 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 11, rows 10001:11000: 6.24 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 12, rows 11001:12000: 7.2 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 13, rows 12001:13000: 6.48 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 14, rows 13001:14000: 7.32 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 15, rows 14001:15000: 6.73 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 16, rows 15001:16000: 6.92 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 17, rows 16001:17000: 6.68 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 18, rows 17001:18000: 7.34 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 19, rows 18001:19000: 6.75 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 20, rows 19001:20000: 6.83 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 21, rows 20001:21000: 6.79 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 22, rows 21001:22000: 7.33 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 23, rows 22001:23000: 6.46 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 24, rows 23001:24000: 6.43 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 25, rows 24001:25000: 6.64 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 26, rows 25001:26000: 6.82 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 27, rows 26001:27000: 7.17 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 28, rows 27001:28000: 11.36 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 29, rows 28001:29000: 7.21 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 30, rows 29001:30000: 7.84 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 31, rows 30001:31000: 6.2 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 32, rows 31001:32000: 7.52 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 33, rows 32001:33000: 11.05 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 34, rows 33001:34000: 8.48 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 35, rows 34001:35000: 6.8 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 36, rows 35001:36000: 7.79 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 37, rows 36001:37000: 6.43 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 38, rows 37001:38000: 8.31 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 39, rows 38001:39000: 6.53 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 40, rows 39001:40000: 6.62 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.3 GiB
-
-    ## loop 41, rows 40001:41000: 13.19 sec elapsed
-
-    ## Warning in asMethod(object): sparse->dense coercion: allocating vector of size
-    ## 1.1 GiB
-
-    ## final loop, rows 41001:41861: 7.74 sec elapsed
-    ## total: 308.17 sec elapsed
+    ## final loop, rows 1001:2000: 6.99 sec elapsed
+    ## total: 15.56 sec elapsed
 
 # read 1 gene at a time
 
@@ -379,31 +215,31 @@ tic();HDF5Array::writeHDF5Array(
   file_h5array, as.sparse = FALSE, name = 'full', with.dimnames = TRUE);toc()
 ```
 
-    ## <41861 x 173954> HDF5Matrix object of type "double":
-    ##           bcIIOD bcHTNA bcDLAV ... bcELDH bcFGGM
-    ##   5S_rRNA      0      0      0   .      0      0
-    ## 5_8S_rRNA      0      0      0   .      0      0
-    ##       7SK      0      0      0   .      0      0
-    ##      A1BG      0      0      0   .      0      0
-    ##  A1BG-AS1      0      0      0   .      0      0
-    ##       ...      .      .      .   .      .      .
-    ##   snoZ278      0      0      0   .      0      0
-    ##    snoZ40      0      0      0   .      0      0
-    ##     snoZ6      0      0      0   .      0      0
-    ##  snosnR66      0      0      0   .      0      0
-    ##    uc_338      0      0      0   .      0      0
+    ## <2000 x 173954> HDF5Matrix object of type "double":
+    ##            bcIIOD bcHTNA bcDLAV ... bcELDH bcFGGM
+    ##    5S_rRNA      0      0      0   .      0      0
+    ##  5_8S_rRNA      0      0      0   .      0      0
+    ##        7SK      0      0      0   .      0      0
+    ##       A1BG      0      0      0   .      0      0
+    ##   A1BG-AS1      0      0      0   .      0      0
+    ##        ...      .      .      .   .      .      .
+    ## AC010247.2      0      0      0   .      0      0
+    ## AC010255.1      0      0      0   .      0      0
+    ## AC010255.2      0      0      0   .      0      0
+    ## AC010255.3      0      0      0   .      0      0
+    ## AC010260.1      0      0      0   .      0      0
 
-    ## 443.03 sec elapsed
+    ## 18.76 sec elapsed
 
 ``` r
 h5ls(file_h5array)
 ```
 
-    ##             group           name       otype dclass            dim
-    ## 0               / .full_dimnames   H5I_GROUP                      
-    ## 1 /.full_dimnames              1 H5I_DATASET STRING          41861
-    ## 2 /.full_dimnames              2 H5I_DATASET STRING         173954
-    ## 3               /           full H5I_DATASET  FLOAT 41861 x 173954
+    ##             group           name       otype dclass           dim
+    ## 0               / .full_dimnames   H5I_GROUP                     
+    ## 1 /.full_dimnames              1 H5I_DATASET STRING          2000
+    ## 2 /.full_dimnames              2 H5I_DATASET STRING        173954
+    ## 3               /           full H5I_DATASET  FLOAT 2000 x 173954
 
 ``` r
 hf5 <- HDF5Array(file_h5array,  name = 'full', as.sparse = TRUE)
@@ -417,8 +253,8 @@ hf5['AC006486.2',] |>  head()
 showtree(hf5)
 ```
 
-    ## 41861x173954 double, sparse: HDF5Matrix object
-    ## └─ 41861x173954 double, sparse: [seed] HDF5ArraySeed object
+    ## 2000x173954 double, sparse: HDF5Matrix object
+    ## └─ 2000x173954 double, sparse: [seed] HDF5ArraySeed object
 
 ``` r
 showtree(hf5[2,])
@@ -454,20 +290,20 @@ bench_read <- bench::mark(
 summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
 ```
 
-<div id="rndavfqsrh" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#rndavfqsrh table {
+<div id="tlqwgwiwbp" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>#tlqwgwiwbp table {
   font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-&#10;#rndavfqsrh thead, #rndavfqsrh tbody, #rndavfqsrh tfoot, #rndavfqsrh tr, #rndavfqsrh td, #rndavfqsrh th {
+&#10;#tlqwgwiwbp thead, #tlqwgwiwbp tbody, #tlqwgwiwbp tfoot, #tlqwgwiwbp tr, #tlqwgwiwbp td, #tlqwgwiwbp th {
   border-style: none;
 }
-&#10;#rndavfqsrh p {
+&#10;#tlqwgwiwbp p {
   margin: 0;
   padding: 0;
 }
-&#10;#rndavfqsrh .gt_table {
+&#10;#tlqwgwiwbp .gt_table {
   display: table;
   border-collapse: collapse;
   line-height: normal;
@@ -492,11 +328,11 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-left-width: 2px;
   border-left-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_caption {
+&#10;#tlqwgwiwbp .gt_caption {
   padding-top: 4px;
   padding-bottom: 4px;
 }
-&#10;#rndavfqsrh .gt_title {
+&#10;#tlqwgwiwbp .gt_title {
   color: #333333;
   font-size: 125%;
   font-weight: initial;
@@ -507,7 +343,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-bottom-color: #FFFFFF;
   border-bottom-width: 0;
 }
-&#10;#rndavfqsrh .gt_subtitle {
+&#10;#tlqwgwiwbp .gt_subtitle {
   color: #333333;
   font-size: 85%;
   font-weight: initial;
@@ -518,7 +354,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-top-color: #FFFFFF;
   border-top-width: 0;
 }
-&#10;#rndavfqsrh .gt_heading {
+&#10;#tlqwgwiwbp .gt_heading {
   background-color: #FFFFFF;
   text-align: center;
   border-bottom-color: #FFFFFF;
@@ -529,12 +365,12 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_bottom_border {
+&#10;#tlqwgwiwbp .gt_bottom_border {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_col_headings {
+&#10;#tlqwgwiwbp .gt_col_headings {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -548,7 +384,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_col_heading {
+&#10;#tlqwgwiwbp .gt_col_heading {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -567,7 +403,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-right: 5px;
   overflow-x: hidden;
 }
-&#10;#rndavfqsrh .gt_column_spanner_outer {
+&#10;#tlqwgwiwbp .gt_column_spanner_outer {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -578,13 +414,13 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-left: 4px;
   padding-right: 4px;
 }
-&#10;#rndavfqsrh .gt_column_spanner_outer:first-child {
+&#10;#tlqwgwiwbp .gt_column_spanner_outer:first-child {
   padding-left: 0;
 }
-&#10;#rndavfqsrh .gt_column_spanner_outer:last-child {
+&#10;#tlqwgwiwbp .gt_column_spanner_outer:last-child {
   padding-right: 0;
 }
-&#10;#rndavfqsrh .gt_column_spanner {
+&#10;#tlqwgwiwbp .gt_column_spanner {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
@@ -595,10 +431,10 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   display: inline-block;
   width: 100%;
 }
-&#10;#rndavfqsrh .gt_spanner_row {
+&#10;#tlqwgwiwbp .gt_spanner_row {
   border-bottom-style: hidden;
 }
-&#10;#rndavfqsrh .gt_group_heading {
+&#10;#tlqwgwiwbp .gt_group_heading {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -623,7 +459,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   vertical-align: middle;
   text-align: left;
 }
-&#10;#rndavfqsrh .gt_empty_group_heading {
+&#10;#tlqwgwiwbp .gt_empty_group_heading {
   padding: 0.5px;
   color: #333333;
   background-color: #FFFFFF;
@@ -637,13 +473,13 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-bottom-color: #D3D3D3;
   vertical-align: middle;
 }
-&#10;#rndavfqsrh .gt_from_md > :first-child {
+&#10;#tlqwgwiwbp .gt_from_md > :first-child {
   margin-top: 0;
 }
-&#10;#rndavfqsrh .gt_from_md > :last-child {
+&#10;#tlqwgwiwbp .gt_from_md > :last-child {
   margin-bottom: 0;
 }
-&#10;#rndavfqsrh .gt_row {
+&#10;#tlqwgwiwbp .gt_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -661,7 +497,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   vertical-align: middle;
   overflow-x: hidden;
 }
-&#10;#rndavfqsrh .gt_stub {
+&#10;#tlqwgwiwbp .gt_stub {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -673,7 +509,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#rndavfqsrh .gt_stub_row_group {
+&#10;#tlqwgwiwbp .gt_stub_row_group {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -686,13 +522,13 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-right: 5px;
   vertical-align: top;
 }
-&#10;#rndavfqsrh .gt_row_group_first td {
+&#10;#tlqwgwiwbp .gt_row_group_first td {
   border-top-width: 2px;
 }
-&#10;#rndavfqsrh .gt_row_group_first th {
+&#10;#tlqwgwiwbp .gt_row_group_first th {
   border-top-width: 2px;
 }
-&#10;#rndavfqsrh .gt_summary_row {
+&#10;#tlqwgwiwbp .gt_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -701,14 +537,14 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#rndavfqsrh .gt_first_summary_row {
+&#10;#tlqwgwiwbp .gt_first_summary_row {
   border-top-style: solid;
   border-top-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_first_summary_row.thick {
+&#10;#tlqwgwiwbp .gt_first_summary_row.thick {
   border-top-width: 2px;
 }
-&#10;#rndavfqsrh .gt_last_summary_row {
+&#10;#tlqwgwiwbp .gt_last_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -717,7 +553,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_grand_summary_row {
+&#10;#tlqwgwiwbp .gt_grand_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -726,7 +562,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#rndavfqsrh .gt_first_grand_summary_row {
+&#10;#tlqwgwiwbp .gt_first_grand_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -735,7 +571,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-top-width: 6px;
   border-top-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_last_grand_summary_row_top {
+&#10;#tlqwgwiwbp .gt_last_grand_summary_row_top {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -744,10 +580,10 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-bottom-width: 6px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_striped {
+&#10;#tlqwgwiwbp .gt_striped {
   background-color: rgba(128, 128, 128, 0.05);
 }
-&#10;#rndavfqsrh .gt_table_body {
+&#10;#tlqwgwiwbp .gt_table_body {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -755,7 +591,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_footnotes {
+&#10;#tlqwgwiwbp .gt_footnotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -768,7 +604,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_footnote {
+&#10;#tlqwgwiwbp .gt_footnote {
   margin: 0px;
   font-size: 90%;
   padding-top: 4px;
@@ -776,7 +612,7 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#rndavfqsrh .gt_sourcenotes {
+&#10;#tlqwgwiwbp .gt_sourcenotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -789,57 +625,57 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#rndavfqsrh .gt_sourcenote {
+&#10;#tlqwgwiwbp .gt_sourcenote {
   font-size: 90%;
   padding-top: 4px;
   padding-bottom: 4px;
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#rndavfqsrh .gt_left {
+&#10;#tlqwgwiwbp .gt_left {
   text-align: left;
 }
-&#10;#rndavfqsrh .gt_center {
+&#10;#tlqwgwiwbp .gt_center {
   text-align: center;
 }
-&#10;#rndavfqsrh .gt_right {
+&#10;#tlqwgwiwbp .gt_right {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-&#10;#rndavfqsrh .gt_font_normal {
+&#10;#tlqwgwiwbp .gt_font_normal {
   font-weight: normal;
 }
-&#10;#rndavfqsrh .gt_font_bold {
+&#10;#tlqwgwiwbp .gt_font_bold {
   font-weight: bold;
 }
-&#10;#rndavfqsrh .gt_font_italic {
+&#10;#tlqwgwiwbp .gt_font_italic {
   font-style: italic;
 }
-&#10;#rndavfqsrh .gt_super {
+&#10;#tlqwgwiwbp .gt_super {
   font-size: 65%;
 }
-&#10;#rndavfqsrh .gt_footnote_marks {
+&#10;#tlqwgwiwbp .gt_footnote_marks {
   font-size: 75%;
   vertical-align: 0.4em;
   position: initial;
 }
-&#10;#rndavfqsrh .gt_asterisk {
+&#10;#tlqwgwiwbp .gt_asterisk {
   font-size: 100%;
   vertical-align: 0;
 }
-&#10;#rndavfqsrh .gt_indent_1 {
+&#10;#tlqwgwiwbp .gt_indent_1 {
   text-indent: 5px;
 }
-&#10;#rndavfqsrh .gt_indent_2 {
+&#10;#tlqwgwiwbp .gt_indent_2 {
   text-indent: 10px;
 }
-&#10;#rndavfqsrh .gt_indent_3 {
+&#10;#tlqwgwiwbp .gt_indent_3 {
   text-indent: 15px;
 }
-&#10;#rndavfqsrh .gt_indent_4 {
+&#10;#tlqwgwiwbp .gt_indent_4 {
   text-indent: 20px;
 }
-&#10;#rndavfqsrh .gt_indent_5 {
+&#10;#tlqwgwiwbp .gt_indent_5 {
   text-indent: 25px;
 }
 </style>
@@ -859,32 +695,32 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
   </thead>
   <tbody class="gt_table_body">
     <tr><td headers="expression" class="gt_row gt_center">[, hf5, AC006486.2, </td>
-<td headers="min" class="gt_row gt_center">1.84s</td>
-<td headers="median" class="gt_row gt_center">1.84s</td>
-<td headers="itr/sec" class="gt_row gt_right">0.5441028</td>
-<td headers="mem_alloc" class="gt_row gt_center">10.11MB</td>
+<td headers="min" class="gt_row gt_center">607.88ms</td>
+<td headers="median" class="gt_row gt_center">607.88ms</td>
+<td headers="itr/sec" class="gt_row gt_right">1.645066</td>
+<td headers="mem_alloc" class="gt_row gt_center">8.06MB</td>
 <td headers="gc/sec" class="gt_row gt_right">0</td>
 <td headers="n_itr" class="gt_row gt_right">1</td>
 <td headers="n_gc" class="gt_row gt_right">0</td>
-<td headers="total_time" class="gt_row gt_center">1.84s</td></tr>
+<td headers="total_time" class="gt_row gt_center">608ms</td></tr>
     <tr><td headers="expression" class="gt_row gt_center">read_gene, AC006486.2, file_h5</td>
-<td headers="min" class="gt_row gt_center">769.14ms</td>
-<td headers="median" class="gt_row gt_center">769.14ms</td>
-<td headers="itr/sec" class="gt_row gt_right">1.3001609</td>
-<td headers="mem_alloc" class="gt_row gt_center">4.97MB</td>
+<td headers="min" class="gt_row gt_center">895.33ms</td>
+<td headers="median" class="gt_row gt_center">895.33ms</td>
+<td headers="itr/sec" class="gt_row gt_right">1.116911</td>
+<td headers="mem_alloc" class="gt_row gt_center">4.06MB</td>
 <td headers="gc/sec" class="gt_row gt_right">0</td>
 <td headers="n_itr" class="gt_row gt_right">1</td>
 <td headers="n_gc" class="gt_row gt_right">0</td>
-<td headers="total_time" class="gt_row gt_center">769.14ms</td></tr>
+<td headers="total_time" class="gt_row gt_center">895ms</td></tr>
     <tr><td headers="expression" class="gt_row gt_center">[, counts, AC006486.2, </td>
-<td headers="min" class="gt_row gt_center">145.37ms</td>
-<td headers="median" class="gt_row gt_center">152.82ms</td>
-<td headers="itr/sec" class="gt_row gt_right">6.5416653</td>
-<td headers="mem_alloc" class="gt_row gt_center">3.93MB</td>
+<td headers="min" class="gt_row gt_center">7.35ms</td>
+<td headers="median" class="gt_row gt_center">8.58ms</td>
+<td headers="itr/sec" class="gt_row gt_right">113.139484</td>
+<td headers="mem_alloc" class="gt_row gt_center">3.63MB</td>
 <td headers="gc/sec" class="gt_row gt_right">0</td>
-<td headers="n_itr" class="gt_row gt_right">4</td>
+<td headers="n_itr" class="gt_row gt_right">57</td>
 <td headers="n_gc" class="gt_row gt_right">0</td>
-<td headers="total_time" class="gt_row gt_center">611.47ms</td></tr>
+<td headers="total_time" class="gt_row gt_center">504ms</td></tr>
   </tbody>
   &#10;  
 </table>
@@ -907,10 +743,21 @@ sce_h5 <- SingleCellExperiment(assays = list(counts = hf5))
 object.size(sce_h5) |>  print(units = 'auto')
 ```
 
-    ## 9.1 Mb
+    ## 6.3 Mb
 
 ``` r
 object.size(counts) |>  print(units = 'auto')
 ```
 
-    ## 624.4 Mb
+    ## 13.1 Mb
+
+``` r
+bench::mark(
+  sce_h5['AC006486.2',]
+)
+```
+
+    ## # A tibble: 1 × 6
+    ##   expression                      min   median `itr/sec` mem_alloc `gc/sec`
+    ##   <bch:expr>                 <bch:tm> <bch:tm>     <dbl> <bch:byt>    <dbl>
+    ## 1 "sce_h5[\"AC006486.2\", ]"    122ms    127ms      7.87    6.08MB     2.62

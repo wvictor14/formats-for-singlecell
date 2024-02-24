@@ -1,7 +1,7 @@
 ---
 title: "Not enough memory? HDF5, a data format for single cell RNAseq data"
 output: github_document
-date: "2024-02-23"
+date: "2024-03-01"
 editor_options: 
   chunk_output_type: console
 ---
@@ -46,7 +46,7 @@ library(glue)
 
 ```{r}
 sce <- ZilionisLungData()
-counts <- sce@assays@data$counts[,]
+counts <- sce@assays@data$counts[1:2000,]
 ```
 
 # saving dgc matrix manually with hdf5r
@@ -105,6 +105,8 @@ write_dgc_to_h5(counts, file_h5, chunk_size = 1000)
 
 # read 1 gene at a time
 
+Now to define a function that opens the h5 file, reads the particular slice of data we want, and then close the h5 file. It is important to ensure the file gets closed, otherwise it can get corrupt. This is a bit of a drawback for this approach, but I have yet to encounter a problem so far. 
+
 ```{r}
 read_gene <- function(gene, file_h5) {
   #tic('whole thing')
@@ -146,9 +148,9 @@ gene <- read_gene('AC006486.2', file_h5)
 
 # HDF5array
 
-Bioconductor has the HDF5array R package that supports writing / loading dense and sparse matrices from .h5 files.
+Bioconductor has the [`HDF5array`](https://bioconductor.org/packages/release/bioc/html/HDF5Array.html) R package that supports writing / loading dense and sparse matrices from `.h5` files.
 
-Let's see how this compares to my manual implementation.
+Let's see how this compares to the manual implementation.
 
 First write to disk using `HDF5Array::writeHDF5Array`
 
@@ -170,10 +172,9 @@ class(hf5)
 is(hf5, 'DelayedMatrix')
 ```
 
-
 # compare HDF5array vs diy implementation
 
-Compare performance
+Let's see if there are differences in performance
 
 ```{r}
 bench_read <- bench::mark(
@@ -186,21 +187,30 @@ summary(bench_read) |> select(-memory, -result, -time, -gc) |>  gt()
 bench_read |>  autoplot(type = 'jitter')
 ```
 
-HDF5array slower than my manual method
+`HDF5array` is slower than my manual method
 
-Fastest is holding in memory, but not by that much.
+Fastest is holding in memory, but not by that much, and of course the cost is occupying a large amount of memory at any given time. 
 
 # singlecellexperiment
 
+In reading `HD5Array` docs, I learned that you can back a `SingleCellExperiment` object with a HDF5-backed matrix. This is actually incredibly useful, because now we can use any packages for `SingleCellExperiment`. 
+
 ```{r}
 sce_h5 <- SingleCellExperiment(assays = list(counts = hf5))
-object.size(sce_h5) |>  print(units = 'auto')
-object.size(counts) |>  print(units = 'auto')
-
-bench::mark(
-  sce_h5['AC006486.2',]
-)
 ```
+
+Size of SingleCellExperiment object backed by HDF5
+
+
+`r object.size(sce_h5) |>  print(units = 'auto')`
+
+Size of dgc counts matrix held in memory
+
+`r object.size(counts) |>  print(units = 'auto')`
+
+Speed:
+
+`r bench::mark(sce_h5['AC006486.2',]) |> gt()`
 
 
 
